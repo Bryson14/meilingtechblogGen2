@@ -1,0 +1,251 @@
+# Advent of Code - 2023 Day 8
+
+## Story
+
+Off we go into the vast sprawling deserts of the desert island wastelands. Our elf guide disappears and is presumably a ghost, but we have a helpfully difficult map to navigate us through the desert and sandstorms.
+
+## Why this matters
+
+Today’s puzzle will deal with traversing networks. Now in Rust, there is a temptation to follow the standard of other languages and use Objects like trees and maps, things that use nodes to reference each other. In Rust, this ends up being difficult because linked lists and maps are just often hard due to lifetimes and the borrow checker. So we are going to use HashMaps.
+
+What is a hashmap? Some may know of them as VLookup in Excel or dict in Python. It just means that there is a key to look up something and that something has a value attached to it.
+
+So when using this information for later puzzle solving and perhaps future careers, know that the ability to have keys and values stored together is often an efficient combo.
+
+## Part 1
+
+We just need to check out how many steps it takes to follow the instructions it takes to walk from AAA to ZZZ .
+
+We are going to make a quick function to parse this text input into our puzzle. With the above advice in mind, we are going to make a struct that encapsulates this map into a HashMap :
+
+```rust
+#[derive(Debug, PartialEq)]
+pub struct TwoPathNetwork<'a> {
+    nodes: HashMap<&'a str, ExitPaths<'a>>,
+    instructions: &'a str,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ExitPaths<'a> {
+    left: &'a str,
+    right: &'a str,
+}
+```
+
+Then all we have to do is read the text into this struct.
+
+```rust
+fn read_network(input: &str) -> TwoPathNetwork {
+    let mut nodes: HashMap<&str, ExitPaths> = HashMap::new();
+    let mut instructions = "";
+    for line in input.lines() {
+        // if the line is empty, skip it
+        // if the line contains R or L, it's the instructions line
+        // if the line contains =, it's a node
+        match line {
+            "" => continue,
+            line if line.contains("=") => {
+                let mut split = line.split("=");
+                let node = split.next().unwrap().trim();
+                let paths = split.next().unwrap().trim();
+                let mut paths = paths.split(",");
+                let left = paths.next().unwrap().trim();
+                let right = paths.next().unwrap().trim();
+                // slice from 1 to remove the leading '('
+                let left = &left[1..];
+                // slice from 0 to almost end remove the trailing ')'
+                let right = &right[..right.len() - 1];
+                nodes.insert(node, ExitPaths { left, right });
+            }
+            line if line.contains("R") || line.contains("L") => instructions = line,
+            _ => panic!("Invalid input line: {}", line),
+        }
+    }
+    TwoPathNetwork {
+        nodes,
+        instructions,
+    }
+}
+```
+
+As a side note, using next() , unwrap() , and other string slices if often error-prone, fragile, and shouldn’t be used in production. But this is the advent of code and the text input can always be guaranteed.
+
+_Easy to make bug…_
+
+In this case, checking for R or L before the checking for = could cause issues because nodes can contain “R” or “L”.
+
+Now with the network read in, we just have to iterate infinitely over the instructions with rust’s helpful `cycle()` iterator and jump around the map.
+
+```rust
+pub fn solve(input: &str) {
+    let network = read_network(input);
+
+    println!("Network length: {}", network.nodes.len());
+    // iterate over the instructions
+    // start at AAA and end once we reach ZZZ
+    let mut current_node = "AAA";
+    let mut steps = 0;
+    for instruction in network.instructions.chars().cycle() {
+        steps += 1;
+        let node = network.nodes.get(current_node).expect(&format!("Invalid node: {}", current_node));
+        match instruction {
+            'L' => current_node = node.left,
+            'R' => current_node = node.right,
+            _ => panic!("Invalid instruction: {}", instruction),
+        }
+        if current_node == "ZZZ" {
+            break;
+        }
+    }
+
+    println!("Steps to traverse the network: {}", steps);
+}
+```
+
+Success!! My answer for part 1 was around 20,000.
+
+## Part 2
+
+This at first seems like a slight twist. We need to track multiple positions and find how many steps until they all meet a certain criteria. So lets just make a few tweaks and see how this goes.
+
+```rust
+pub fn solve(input: &str) {
+    let network = read_network(input);
+
+    // get all the nodes that end in A
+    let mut current_nodes: Vec<&str> = network.nodes.keys().filter(|node| node.ends_with("A")).map(|node| *node).collect();
+    let mut steps = 0;
+
+    println!("Starting nodes, len: {}", current_nodes.len());
+
+    // iterate over the instructions infinitely
+    for instruction in network.instructions.chars().cycle() {
+        steps += 1;
+        // get the next nodes
+        // replace current_nodes with next_nodes to prevent time getting new memory allocation
+        for node_idx in 0..current_nodes.len() {
+            let node = current_nodes[node_idx];
+            let node = network.nodes.get(node).expect(&format!("Invalid node: {}", node));
+            // println!("Node {}: {:?}, Instruction: {}", node_idx, node, instruction);
+            match instruction {
+                'L' => {
+                    current_nodes[node_idx] = node.left;
+                }
+                'R' => {
+                    current_nodes[node_idx] = node.right;
+                }
+                _ => panic!("Invalid instruction: {}", instruction),
+            }
+        }
+        // if all the nodes end in Z, we're done
+        if current_nodes.iter().all(|node| node.ends_with("Z")) {
+            break;
+        }
+    }
+
+    // every 1000 steps print the number of steps
+
+    println!("Steps to traverse the network simultaneously: {}", steps);
+}
+```
+
+Here we are finding all the nodes that end in A and adding them to current_nodes . Then we cycle through the instructions while updating the current position of the nodes.
+
+Let’s run it…
+
+and…
+
+_oh dear, it’s at 500 Million cycles and still going…_
+
+_It's been 10 minutes…_
+
+Let's think about this:
+
+1. This problem deals with traversing a network efficiently. We did that.
+2. We need to track multiple positions simultaneously. We did that.
+3. Perhaps these positions will cycle forever because when I look at my input, I see that ZZZ doesn’t point to ZZZ , it just points back to two other nodes…
+
+I see, we need to track the steps in each cycle and find the least common multiple. As a refresher about the least common multiple, it's finding the digit that is a large product of the smaller digits.
+
+Least Common Multiple of 2, 3, 4, 5, and 7. Wiki
+In this case, we want to find the least common multiple of the steps for each cycle. So we just need to modify our function so we find all the starting nodes, calculate their steps to cycle, and then calculate their least common multiple. Easy!
+
+> As a side note, in the real world, data is not always this simple and cycles often don’t appear in regular intervals. Least Comon Multiples isn’t usually a valid solutions with messy data. This is more of a estimate to how well these puzzles and inputs are made.
+
+```rust
+pub fn solve(input: &str) {
+    let network = read_network(input);
+
+    // get all the nodes that end in A
+    let current_nodes: Vec<&str> = network
+        .nodes
+        .keys()
+        .filter(|node| node.ends_with("A"))
+        .map(|node| *node)
+        .collect();
+
+    let cycles = current_nodes
+        .iter()
+        .map(|node| calculate_steps_in_cycle(&network, node))
+        .collect::<Vec<usize>>();
+
+    // get the least common multiple of all the cycles,
+    // fold the cycles into the least common multiple
+    let steps = cycles
+        .iter()
+        .fold(1, |acc, cycle| least_common_multiple(acc, *cycle));
+
+    // every 1000 steps print the number of steps
+
+    println!("Steps to traverse the network simultaneously: {}", steps);
+}
+
+/// Gets the number of steps it takes for node to cycle to the node that ends in Z
+fn calculate_steps_in_cycle(network: &TwoPathNetwork, node: &str) -> usize {
+    let mut steps = 0;
+    let mut current_node = node;
+
+    // iterate over the instructions infinitely
+    for instruction in network.instructions.chars().cycle() {
+        steps += 1;
+        let node = network
+            .nodes
+            .get(node)
+            .expect(&format!("Invalid node: {}", node));
+        // println!("Node {}: {:?}, Instruction: {}", node_idx, node, instruction);
+        match instruction {
+            'L' => {
+                current_node = node.left;
+            }
+            'R' => {
+                current_node = node.right;
+            }
+            _ => panic!("Invalid instruction: {}", instruction),
+        }
+
+        // if all the nodes end in Z, we're done
+        if current_node.ends_with("Z") {
+            break;
+        }
+    }
+
+    steps
+}
+
+fn greatest_common_factor(a: usize, b: usize) -> usize {
+    let min_val = std::cmp::min(a, b);
+    let max_val = std::cmp::max(a, b);
+    if min_val == 0 {
+        return max_val;
+    }
+    greatest_common_factor(min_val, max_val % min_val)
+}
+
+fn least_common_multiple(a: usize, b: usize) -> usize {
+    a * (b / greatest_common_factor(a, b))
+}
+```
+
+Well that was a bit messy but who know middle school math would come in to save the day!
+
+My answer for part 2 was about 1000.

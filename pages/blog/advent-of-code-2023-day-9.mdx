@@ -1,0 +1,90 @@
+# Advent of Code: Day 9, 2023 (Rust)
+
+## Story
+
+We are on a B-Plot side quest at this point… We are stuck in a desert and decide to figure out weather forecasts to leave for the next unwary traveler. While I admire our ingenuity and generosity, this elf mixup is getting out of hand. You best believe elf management of these sand and water islands is going to be on the naughty list.
+
+## Why This Matters?
+
+In this problem, we are simply doing a simple forecast on a set of time-series data by looking at the differences in values. In statistics and trading, this is called differencing. This shows that some forecasting methods are much simpler than others and can still generate helpful insights. This problem could easily be done with Excel and not with any fancy rust code.
+
+## Part 1
+
+Need to read the value from the problem into some vectors. then we just need to follow some simple rules of adding the next predefined number to the end of these expanded difference maps.
+
+First, to read the data, we are just going to treat everything as a `isize` since we have to deal with negatives and we aren’t dealing with massive numbers.
+
+```rust
+fn read_history_line(line: &str) -> Vec<isize> {
+   line.split_whitespace()
+       .map(|num| num.parse::<isize>().unwrap())
+       .collect()
+}
+
+fn read_all_history(input: &str) -> Vec<Vec<isize>> {
+   input.lines().map(read_history_line).collect()
+}
+```
+
+Then we create a `diff_map` or difference map as I’m calling it. It's just the difference of the time-series data and we stop once all the differences are 0. This data is great because it always reduces down to a nice 0, but in real data, we’d have to define a cutoff where the difference was nearly 0.
+
+```rust
+fn create_diff_map(history: &[isize]) -> Vec<Vec<isize>> {
+   let mut diff_map = Vec::new();
+   diff_map.push(history.to_vec());
+   let mut curr_list = 0;
+   loop {
+       let mut new_diffs = Vec::new();
+       for i in 0..diff_map[curr_list].len() - 1 {
+           // find the diffs and add them to the new list
+           let diff = diff_map[curr_list][i + 1] - diff_map[curr_list][i];
+           new_diffs.push(diff);
+       }
+
+       // add the new list to the diff map
+       diff_map.push(new_diffs);
+       curr_list += 1;
+
+       // if the new list is all zeros, we are done
+       if diff_map[curr_list].iter().all(|&x| x == 0) {
+           break;
+       }
+   }
+   diff_map
+}
+```
+
+Visually it means that we go from a time-series data like this:
+
+```rust
+let input = vec![0, 3, 6, 9, 12, 15];
+```
+
+To a difference map like this:
+
+```rust
+let expected = vec![
+   vec![0, 3, 6, 9, 12, 15],
+   vec![3, 3, 3, 3, 3],
+   vec![0, 0, 0, 0],
+];
+```
+
+Finally, to solve for the next forecasted number, we take this `diff_map` and loop through it. We set some simple rules. 1) If we are on the bottom row, we add a 0 and move to the row above it. 2) If we are not of the bottom row, we get the last item in the row, and the last item in the row below and add them together. It all together looks something like this:
+
+```rust
+fn extrapolate_next_diff_map(diff_map: &mut Vec<Vec<isize>>) {
+   for row_idx in (0..diff_map.len()).rev() {
+       if row_idx == diff_map.len() - 1 {
+           diff_map[row_idx].push(0);
+       } else {
+           // get the last items in the row and the row below it
+           let last_item = diff_map[row_idx].last().unwrap().clone();
+           let below_item = diff_map[row_idx + 1].last().unwrap().clone();
+           diff_map[row_idx].push(last_item + below_item);
+       }
+   }
+}
+```
+
+We had to use `clone()` here because Rust’s borrow checker is complaining that we are referencing `last_item` with makes `diff_map` as that point is immutable. So we have to release our hold on `diff_map` by cloning `last_item`. Under the hood, cloning a `isize` will be just a memcpy memory copy and is very quick.
